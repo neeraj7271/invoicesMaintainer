@@ -1,0 +1,213 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum WorkspaceRole {
+  OWNER
+  STAFF
+}
+
+enum InvoiceStatus {
+  UNPAID
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+}
+
+enum ReminderChannel {
+  EMAIL
+}
+
+enum ReminderStatus {
+  SENT
+  FAILED
+  SKIPPED
+}
+
+enum ActivityType {
+  WORKSPACE_CREATED
+  CLIENT_CREATED
+  CLIENT_UPDATED
+  INVOICE_CREATED
+  INVOICE_UPDATED
+  PAYMENT_RECORDED
+  REMINDER_SENT
+  SETTINGS_UPDATED
+}
+
+model User {
+  id                  String            @id @default(cuid())
+  email               String            @unique
+  name                String
+  passwordHash        String
+  resetTokenHash      String?
+  resetTokenExpiresAt DateTime?
+  memberships         WorkspaceMember[]
+  activities          Activity[]
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+}
+
+model Workspace {
+  id                      String             @id @default(cuid())
+  name                    String
+  legalName               String?
+  currency                String             @default("USD")
+  defaultReminderSchedule Int[]              @default([-3, 0, 3, 7, 14])
+  senderName              String?
+  senderEmail             String?
+  timezone                String             @default("UTC")
+  members                 WorkspaceMember[]
+  clients                 Client[]
+  invoices                Invoice[]
+  reminderTemplates       ReminderTemplate[]
+  reminderLogs            ReminderLog[]
+  activities              Activity[]
+  createdAt               DateTime           @default(now())
+  updatedAt               DateTime           @updatedAt
+}
+
+model WorkspaceMember {
+  id          String        @id @default(cuid())
+  userId      String
+  workspaceId String
+  role        WorkspaceRole @default(OWNER)
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdAt   DateTime      @default(now())
+
+  @@unique([userId, workspaceId])
+  @@index([workspaceId])
+}
+
+model Client {
+  id          String    @id @default(cuid())
+  workspaceId String
+  name        String
+  email       String
+  phone       String?
+  company     String?
+  notes       String?
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  invoices    Invoice[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([workspaceId])
+  @@index([email])
+}
+
+model Invoice {
+  id               String         @id @default(cuid())
+  workspaceId      String
+  clientId         String
+  invoiceNumber    String
+  amount           Decimal        @db.Decimal(12, 2)
+  currency         String         @default("USD")
+  issueDate        DateTime
+  dueDate          DateTime
+  description      String?
+  status           InvoiceStatus  @default(UNPAID)
+  reminderSchedule Int[]          @default([])
+  workspace        Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  client           Client         @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  lineItems        LineItem[]
+  payments         Payment[]
+  attachments      Attachment[]
+  reminderLogs     ReminderLog[]
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@unique([workspaceId, invoiceNumber])
+  @@index([workspaceId, dueDate])
+  @@index([clientId])
+}
+
+model LineItem {
+  id          String   @id @default(cuid())
+  invoiceId   String
+  description String
+  quantity    Decimal  @default(1) @db.Decimal(10, 2)
+  unitPrice   Decimal  @db.Decimal(12, 2)
+  amount      Decimal  @db.Decimal(12, 2)
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+}
+
+model Payment {
+  id        String   @id @default(cuid())
+  invoiceId String
+  amount    Decimal  @db.Decimal(12, 2)
+  paidAt    DateTime
+  note      String?
+  invoice   Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@index([invoiceId])
+}
+
+model Attachment {
+  id           String   @id @default(cuid())
+  invoiceId    String
+  filename     String
+  originalName String
+  mimeType     String
+  size         Int
+  path         String
+  invoice      Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now())
+}
+
+model ReminderTemplate {
+  id          String          @id @default(cuid())
+  workspaceId String
+  name        String
+  channel     ReminderChannel @default(EMAIL)
+  subject     String
+  body        String
+  workspace   Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@index([workspaceId])
+}
+
+model ReminderLog {
+  id                  String         @id @default(cuid())
+  invoiceId           String
+  workspaceId          String
+  channel             ReminderChannel @default(EMAIL)
+  recipient           String
+  subject             String
+  body                String
+  status              ReminderStatus
+  providerMessage     String?
+  scheduledOffsetDays Int
+  sentAt              DateTime       @default(now())
+  invoice             Invoice        @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  workspace           Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId, scheduledOffsetDays])
+  @@index([workspaceId, sentAt])
+}
+
+model Activity {
+  id          String       @id @default(cuid())
+  workspaceId String
+  userId      String?
+  type        ActivityType
+  title       String
+  body        String?
+  entityType  String?
+  entityId    String?
+  workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt   DateTime     @default(now())
+
+  @@index([workspaceId, createdAt])
+}

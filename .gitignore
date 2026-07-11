@@ -1,0 +1,10 @@
+node_modules
+dist
+client/dist
+.env
+.env.local
+uploads
+.DS_Store
+*.log
+coverage
+.vite
